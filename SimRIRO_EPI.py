@@ -7,8 +7,8 @@ from scipy.interpolate import griddata
 # -----------------------------------------------------------------------------#
 # Load images
 # -----------------------------------------------------------------------------#
-sc_mask = nib.load('/spinal_cord_seg.nii')
-sim_img = nib.load('/GRE-T1w.nii')
+sc_mask = nib.load('/sim_data/spinal_cord_seg.nii')
+sim_img = nib.load('/sim_data/GRE-T1w.nii')
 
 sim_img_data = sim_img.get_fdata()
 sc_mask_data = sc_mask.get_fdata()
@@ -21,10 +21,9 @@ matrix = sim_img.shape # Image dimensinos (x,y)
 image_res = sim_img.header.get_zooms() # Voxel size (mm per pixel)
 fov = np.array(image_res) * np.array(matrix)
 
-TE = 50e-3  # [s], time to center of k-space
-readout_time_per_line = 0.8e-3  # [s], time per ky line
-dwell_time = readout_time_per_line / matrix[0] # [s], time per (kx,ky) point
-readout_time = readout_time_per_line * matrix[1]  # Total readout time
+readout_time = 50e-3  # [s], time to center of k-space
+readout_time_per_line = readout_time/matrix[1]  # [s], time per ky line
+dwell_time = readout_time_per_line / matrix[0] # [s], time per (kx,ky) point 
 readout_start = TE - (readout_time / 2)  # Start time so TE is at center
 TR = 1000e-3  # [s], for multi-shot (not used here)
 
@@ -105,7 +104,7 @@ x_grid, y_grid = np.meshgrid(np.linspace(-(matrix[0]-1)/2, (matrix[0]-1)/2, matr
 
 for t_idx, t in enumerate(time):
     # Compute phase across all (x, y) for this time point
-    phase = (-2 * math.pi * 1j * TE) * sim_RIROmax * np.sin(w_r * t)
+    phase = (-2 * math.pi * 1j ) * sim_RIROmax * (1/w_r) * (1 - np.cos(w_r * t))
     # Apply phase to ideal image
     img_with_phase = sim_img_data * np.exp(phase)
     # Fourier transform to get k-space at this time
@@ -122,30 +121,7 @@ k_space_reshaped = k_space_mod_RIROmax.reshape(matrix)
 # Reconstruct the image
 calcImage_sim_RIROmax_xy = np.fft.ifftshift(np.fft.ifft2(np.fft.ifftshift(k_space_reshaped)))
 
-# Average RIROmax in spinal cord
-sim_RIROmax_meas = np.multiply(sim_RIROmax, sc_mask_data)
-sim_RIROmax_meas = sim_RIROmax_meas[np.nonzero(sim_RIROmax_meas)].mean()
 
-# -----------------------------------------------------------------------------#
-# Z-shim simulation
-# -----------------------------------------------------------------------------#
-k_space_zshim = np.zeros(matrix[0] * matrix[1], dtype=complex)
-
-for t_idx, t in enumerate(time):
-    diff = sim_RIROmax * np.sin(w_r * t) - sim_RIROmax_meas * np.sin(w_r * t)
-    zshim_phase = (2 * math.pi * 1j * TE) * diff
-    img_with_zshim = sim_img_data * np.exp(zshim_phase)
-    k_space_t = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(img_with_zshim)))
-    kx_t, ky_t = k_traj[t_idx]
-    kx_idx = np.argmin(np.abs(kx - kx_t))
-    ky_idx = np.argmin(np.abs(ky - ky_t))
-    k_space_zshim[t_idx] = k_space_t[kx_idx, ky_idx]
-
-# Reshape k-space data into a 2D array
-zshim_k_space_reshaped = zshim_k_space_2D.reshape(matrix)
-
-# Reconstruct the image
-zshim_calcImage_sim_RIROmax_xy = np.fft.ifftshift(np.fft.ifft2(np.fft.ifftshift(zshim_k_space_reshaped)))
 
 # -----------------------------------------------------------------------------#
 # Display
@@ -168,9 +144,6 @@ ax3.imshow(np.flipud(np.abs(calcImage_sim_RIROmax_xy)), cmap='gray', vmin=0, vma
 ax3.set_title('Simulated EPI measurement')
 plt.setp(ax3, xticks=[], yticks=[])
 
-ax4 = fig.add_subplot(1, 4, 4)
-ax4.imshow(np.flipud(np.abs(zshim_calcImage_sim_RIROmax_xy)), cmap='gray', vmin=0, vmax=1200)
-ax4.set_title('Simulated EPI z-shim measurement')
-plt.setp(ax4, xticks=[], yticks=[])
+
 
 plt.show()
